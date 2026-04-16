@@ -115,10 +115,10 @@
 - `401 UNAUTHORIZED`：未帶可用 auth、token 無效、user 不存在
 - `404 NOT_FOUND`：商品不存在或 cart item 不存在
 
-## 4. 訂單（完成，付款為模擬）
+## 4. 訂單（完成，ECPay 主動查詢驗證）
 
 ### 4.1 功能行為
-使用者登入後可從購物車建立訂單，並在訂單詳情頁執行模擬付款。訂單屬於使用者本人，不可跨帳號存取。
+使用者登入後可從購物車建立訂單，並在訂單詳情頁導向 ECPay AIO 付款。由於專案僅在本地執行，付款結果不依賴 Server Notify，而是由本地端主動呼叫 QueryTradeInfo API 驗證並同步訂單狀態。訂單屬於使用者本人，不可跨帳號存取。
 
 ### 4.2 端點與參數
 
@@ -136,7 +136,15 @@
 - Auth：JWT
 - 回傳：自己的單筆訂單（含 `items`）
 
-#### `PATCH /api/orders/:id/pay`
+#### `POST /api/orders/:id/ecpay/checkout-data`
+- Auth：JWT
+- 用途：取得可提交到 ECPay AIO 的表單資料（`action`, `method`, `fields`）
+
+#### `POST /api/orders/:id/ecpay/verify`
+- Auth：JWT
+- 用途：主動查詢 ECPay QueryTradeInfo，更新本地訂單狀態
+
+#### `PATCH /api/orders/:id/pay`（Legacy / 測試用途）
 - Auth：JWT
 - Body
   - 必填：`action`
@@ -152,10 +160,14 @@
   - Insert `order_items`（保存商品名與價格快照）
   - Update `products.stock = stock - quantity`
   - Delete 該 user `cart_items`
-- 付款狀態機：
-  - `pending -> paid`（`action=success`）
-  - `pending -> failed`（`action=fail`）
-  - 非 `pending` 禁止再次付款
+- ECPay 付款：
+  - `checkout-data` 會固定使用同一筆 `MerchantTradeNo`（由 `order_no` 轉換）
+  - 前端導向 ECPay 後返回本地頁面，立即觸發 `verify`
+  - `verify` 依 QueryTradeInfo `TradeStatus` 同步狀態：
+    - `1` -> `paid`
+    - `0` -> 維持 `pending`
+    - 其他（未成立/失敗）在 pending 狀態下標記為 `failed`
+- Legacy 模擬付款仍保留，但不作為正式付款主流程
 
 ### 4.4 錯誤碼與情境
 - `400 VALIDATION_ERROR`：收件欄位缺失、email 格式錯
@@ -164,6 +176,7 @@
 - `400 INVALID_STATUS`：訂單非 pending 卻呼叫 pay
 - `401 UNAUTHORIZED`：未登入或 token 無效
 - `404 NOT_FOUND`：訂單不存在（或非本人）
+- `502 ECPAY_QUERY_FAILED`：主動查詢綠界失敗（網路或上游異常）
 
 ## 5. 後台商品管理（完成）
 
@@ -245,16 +258,18 @@
 - `apiFetch` 收到 `401`：清除 token/user 並導向 `/login`。
 - 其他錯誤：throw 給頁面層，由 `Notification.show` 顯示訊息。
 
-## 8. 金流整合（部分完成）
+## 8. 金流整合（完成本地主動查詢方案）
 
 ### 8.1 已完成
-- 訂單狀態切換 API（模擬付款成功/失敗）。
-- 前端訂單詳情頁付款按鈕與結果提示。
+- ECPay AIO 建單參數組裝與 CheckMacValue（SHA256）計算。
+- 前端可直接 POST 表單導向 ECPay 付款頁。
+- 回商店後由本地端主動呼叫 QueryTradeInfo 驗證付款結果並同步訂單狀態。
+- 保留 legacy 模擬付款端點供測試環境手動驗證。
 
 ### 8.2 未完成
-- 尚未串接 ECPay 真實交易請求與 callback 驗章。
-- `.env` 的 ECPay 參數目前僅為預留。
+- 未建立獨立 payment attempts 歷史表（目前以 `orders.status` 與查詢結果同步）。
+- 未接入公開網域 callback 驗章流程（本專案本地模式不依賴 Server Notify）。
 
 ### 8.3 影響與注意
-- 現行流程可驗證訂單狀態 UI 與狀態機，不可視為真實付款流程。
-- 若接入真實金流，`PATCH /pay` 可能需改為 callback 驅動，須評估對前端流程與測試的破壞性。
+- 現行付款判定的最終來源是 QueryTradeInfo，而非 callback。
+- 若部署公開環境，建議補上 ReturnURL 驗章 + 冪等寫入，主動查詢作為補償機制。

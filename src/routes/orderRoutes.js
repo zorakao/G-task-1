@@ -2,8 +2,15 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../database');
 const authMiddleware = require('../middleware/authMiddleware');
+const ecpayService = require('../services/ecpayService');
 
 const router = express.Router();
+
+// NOTE: Local environment cannot receive ECPay server notify reliably.
+// This endpoint is kept for compatibility and returns the required ack.
+router.post('/ecpay/notify', (req, res) => {
+  res.type('text/plain').send('1|OK');
+});
 
 router.use(authMiddleware);
 
@@ -311,9 +318,141 @@ router.get('/:id', (req, res) => {
 
 /**
  * @openapi
+ * /api/orders/{id}/ecpay/checkout-data:
+ *   post:
+ *     summary: 產生 ECPay AIO 付款表單資料
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: 成功
+ *       400:
+ *         description: 訂單狀態不允許付款
+ *       404:
+ *         description: 訂單不存在
+ */
+router.post('/:id/ecpay/checkout-data', (req, res) => {
+  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(req.params.id, req.user.userId);
+  if (!order) {
+    return res.status(404).json({ data: null, error: 'NOT_FOUND', message: '訂單不存在' });
+  }
+
+  if (order.status !== 'pending') {
+    return res.status(400).json({
+      data: null,
+      error: 'INVALID_STATUS',
+      message: '訂單狀態不是 pending，無法付款'
+    });
+  }
+
+  const items = db.prepare('SELECT product_name FROM order_items WHERE order_id = ?').all(order.id);
+
+  try {
+    const checkout = ecpayService.buildAioCheckoutData({
+      order,
+      items,
+      choosePayment: 'ALL',
+      returnPath: '/api/orders/ecpay/notify',
+      clientBackPath: `/orders/${order.id}?payment=return`
+    });
+
+    res.json({
+      data: checkout,
+      error: null,
+      message: '成功'
+    });
+  } catch (err) {
+    const status = err.code === 'ECPAY_CONFIG_ERROR' ? 500 : 500;
+    res.status(status).json({
+      data: null,
+      error: 'ECPAY_CONFIG_ERROR',
+      message: 'ECPay 設定錯誤，請聯絡系統管理員'
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /api/orders/{id}/ecpay/verify:
+ *   post:
+ *     summary: 主動查詢 ECPay 訂單狀態並同步本地訂單
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: 查詢成功
+ *       404:
+ *         description: 訂單不存在
+ */
+router.post('/:id/ecpay/verify', async (req, res) => {
+  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(req.params.id, req.user.userId);
+  if (!order) {
+    return res.status(404).json({ data: null, error: 'NOT_FOUND', message: '訂單不存在' });
+  }
+
+  try {
+    const merchantTradeNo = ecpayService.toMerchantTradeNo(order.order_no);
+    const query = await ecpayService.queryTradeInfo({ merchantTradeNo });
+    const tradeStatus = String(query.TradeStatus || '');
+
+    let nextStatus = order.status;
+
+    if (tradeStatus === '1') {
+      nextStatus = 'paid';
+    } else if (tradeStatus !== '0' && tradeStatus !== '' && order.status === 'pending') {
+      nextStatus = 'failed';
+    }
+
+    if (nextStatus !== order.status) {
+      db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(nextStatus, order.id);
+    }
+
+    const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
+    const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+
+    res.json({
+      data: {
+        order: { ...updated, items },
+        ecpay: {
+          merchant_trade_no: merchantTradeNo,
+          trade_status: tradeStatus || null,
+          trade_no: query.TradeNo || null,
+          payment_type: query.PaymentType || null,
+          payment_date: query.PaymentDate || null,
+          rtn_msg: query.RtnMsg || null
+        }
+      },
+      error: null,
+      message: '成功'
+    });
+  } catch (err) {
+    res.status(502).json({
+      data: null,
+      error: 'ECPAY_QUERY_FAILED',
+      message: '付款狀態查詢失敗，請稍後再試'
+    });
+  }
+});
+
+/**
+ * @openapi
  * /api/orders/{id}/pay:
  *   patch:
- *     summary: 模擬付款（更新訂單付款狀態）
+ *     summary: [Legacy/Test] 模擬付款（更新訂單付款狀態）
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []

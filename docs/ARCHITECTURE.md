@@ -34,6 +34,7 @@
 | 路徑 | 用途 |
 | --- | --- |
 | `src/database.js` | DB 連線、pragma、建表、seed、交易工具 |
+| `src/services/ecpayService.js` | ECPay 簽章、AIO 參數組裝、QueryTradeInfo 主動查詢 |
 | `src/middleware/authMiddleware.js` | JWT 驗證與 `req.user` 注入 |
 | `src/middleware/adminMiddleware.js` | 管理員權限檢查 |
 | `src/middleware/sessionMiddleware.js` | 擷取 `X-Session-Id` 到 `req.sessionId` |
@@ -41,7 +42,7 @@
 | `src/routes/authRoutes.js` | 註冊/登入/個人資料 |
 | `src/routes/productRoutes.js` | 前台商品查詢 |
 | `src/routes/cartRoutes.js` | 購物車雙模式 API |
-| `src/routes/orderRoutes.js` | 會員訂單、建單、模擬付款 |
+| `src/routes/orderRoutes.js` | 會員訂單、建單、ECPay 建單參數與主動查詢驗證 |
 | `src/routes/adminProductRoutes.js` | 管理員商品 CRUD |
 | `src/routes/adminOrderRoutes.js` | 管理員訂單查詢 |
 | `src/routes/pageRoutes.js` | 前台/後台頁面路由 |
@@ -71,7 +72,7 @@
 | `public/js/pages/checkout.js` | 結帳表單驗證、建單提交、空車導回 |
 | `public/js/pages/login.js` | 登入/註冊 tab 切換與提交流程 |
 | `public/js/pages/orders.js` | 使用者訂單列表載入與狀態顯示 |
-| `public/js/pages/order-detail.js` | 訂單詳情載入與模擬付款操作 |
+| `public/js/pages/order-detail.js` | 訂單詳情載入、ECPay 導轉與付款狀態查詢 |
 | `public/js/pages/admin-products.js` | 後台商品列表、新增/編輯 modal、刪除確認 |
 | `public/js/pages/admin-orders.js` | 後台訂單列表、狀態篩選、詳情 modal |
 
@@ -136,7 +137,7 @@
 | `/api/auth` | `src/routes/authRoutes.js` | register/login 不需；profile 需 JWT | 無 | 帳號註冊、登入、取得個資 |
 | `/api/products` | `src/routes/productRoutes.js` | 不需 | 無 | 商品列表/商品詳情 |
 | `/api/cart` | `src/routes/cartRoutes.js` | 需「JWT 或 X-Session-Id」 | 無 | 購物車查詢/新增/修改/刪除 |
-| `/api/orders` | `src/routes/orderRoutes.js` | 需 JWT | 一般使用者/管理員皆可查自己的訂單 | 建單、查自己的訂單、模擬付款 |
+| `/api/orders` | `src/routes/orderRoutes.js` | 需 JWT（`/ecpay/notify` 例外） | 一般使用者/管理員皆可查自己的訂單 | 建單、查自己的訂單、ECPay 導轉資料與主動查詢 |
 | `/api/admin/products` | `src/routes/adminProductRoutes.js` | 需 JWT | 需 `role=admin` | 後台商品 CRUD |
 | `/api/admin/orders` | `src/routes/adminOrderRoutes.js` | 需 JWT | 需 `role=admin` | 後台訂單列表、詳情 |
 | `/` | `src/routes/pageRoutes.js` | 頁面本身不做 server-side 保護 | 前端 JS guard | 前台與後台頁面渲染 |
@@ -310,12 +311,17 @@
 - 清空該 user 的 `cart_items`
 5. 回傳新訂單摘要。
 
-### 8.4 訂單付款狀態流
+### 8.4 訂單付款狀態流（ECPay 主動查詢）
 - 初始狀態：`pending`
-- `PATCH /api/orders/:id/pay`：
-  - `action=success` -> `paid`
-  - `action=fail` -> `failed`
-- 僅 `pending` 訂單可被此 API 轉換，否則回 `INVALID_STATUS`。
+- `POST /api/orders/:id/ecpay/checkout-data`：
+  - 建立 AIO 表單參數（固定 `MerchantTradeNo`、`ChoosePayment=ALL`）
+  - 前端提交到 `Cashier/AioCheckOut/V5`
+- `POST /api/orders/:id/ecpay/verify`：
+  - 主動查詢 `QueryTradeInfo/V5`
+  - `TradeStatus=1` -> `paid`
+  - `TradeStatus=0` -> 維持 `pending`
+  - 其他失敗碼 -> `failed`（僅在本地仍為 pending 時）
+- `PATCH /api/orders/:id/pay` 保留為 legacy 測試用途，不是正式金流主流程。
 
 ### 8.5 後台資料流
 - 後台頁面只做前端 guard；真正保護在後台 API middleware。
@@ -324,16 +330,17 @@
 
 ## 9. 金流 / 第三方整合現況
 
-目前系統採「模擬付款」而非真實金流：
-- 付款按鈕觸發 `/api/orders/:id/pay`，只更新 `orders.status`。
-- `.env` 雖提供 ECPay 參數（`ECPAY_MERCHANT_ID`, `ECPAY_HASH_KEY`, `ECPAY_HASH_IV`, `ECPAY_ENV`），但程式碼沒有任何 ECPay SDK 或 API 呼叫。
+目前系統採「真實 ECPay 建單 + 本地主動查詢驗證」：
+- 前端提交 AIO 表單到綠界付款頁。
+- 付款返回商店頁後，由本地端呼叫 QueryTradeInfo 主動查詢結果。
+- `.env` 的 ECPay 參數已實際用於簽章與查詢。
 
 現行可視為三階段：
 1. 建單成功（`pending`）
-2. 使用者在訂單詳情頁點選「付款成功/失敗」
-3. 系統更新狀態並刷新 UI
+2. 使用者前往綠界付款並返回本地頁面
+3. 本地端主動查詢 ECPay，更新狀態並刷新 UI
 
 若未來接入真實金流，需新增：
-- 下單後建立第三方交易單
-- callback / webhook 驗章與狀態同步
+- callback / webhook 驗章與狀態同步（公開網域）
+- payment attempt 明細表與完整重試追蹤
 - 付款結果 idempotency 與重放保護

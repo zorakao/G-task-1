@@ -18,7 +18,7 @@
 | `tests/auth.test.js` | 註冊/登入/profile | email 重複、錯密碼、token profile |
 | `tests/products.test.js` | 商品列表/詳情 | 分頁、查無商品 404 |
 | `tests/cart.test.js` | 購物車 guest + auth | dual-mode、數量更新、刪除 |
-| `tests/orders.test.js` | 建單/查單 | 建單成功、空購物車失敗、授權 |
+| `tests/orders.test.js` | 建單/查單/ECPay 流程 | 建單成功、空購物車失敗、checkout-data、主動查詢 verify |
 | `tests/adminProducts.test.js` | 後台商品 CRUD | admin 權限、一般使用者拒絕 |
 | `tests/adminOrders.test.js` | 後台訂單查詢 | status 篩選、詳情、權限 |
 | `tests/setup.js` | 共用 helper | admin token、動態註冊測試帳號 |
@@ -127,5 +127,5 @@ npm test
 
 ### 當前基線（2026-04-16）
 - 測試檔：6
-- 測試數：32
+- 測試數：34
 - 預期：全部通過

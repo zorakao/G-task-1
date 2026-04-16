@@ -80,10 +80,10 @@
 | `FRONTEND_URL` | CORS allow origin | 選填 | `http://localhost:3001`（程式 fallback） | `app.js` |
 | `ADMIN_EMAIL` | seed admin 帳號 | 選填 | `admin@hexschool.com` | `src/database.js` |
 | `ADMIN_PASSWORD` | seed admin 密碼 | 選填 | `12345678` | `src/database.js` |
-| `ECPAY_MERCHANT_ID` | 綠界商店代號（預留） | 選填 | `3002607` | 目前未在程式使用 |
-| `ECPAY_HASH_KEY` | 綠界 hash key（預留） | 選填 | 範例值 | 目前未在程式使用 |
-| `ECPAY_HASH_IV` | 綠界 hash iv（預留） | 選填 | 範例值 | 目前未在程式使用 |
-| `ECPAY_ENV` | 綠界環境（預留） | 選填 | `staging` | 目前未在程式使用 |
+| `ECPAY_MERCHANT_ID` | 綠界商店代號 | 必要（使用 ECPay 時） | `3002607` | `src/services/ecpayService.js` |
+| `ECPAY_HASH_KEY` | 綠界 hash key | 必要（使用 ECPay 時） | 範例值 | `src/services/ecpayService.js` |
+| `ECPAY_HASH_IV` | 綠界 hash iv | 必要（使用 ECPay 時） | 範例值 | `src/services/ecpayService.js` |
+| `ECPAY_ENV` | 綠界環境切換 | 選填 | `staging` | `src/services/ecpayService.js` |
 
 ## 8. JSDoc / OpenAPI 註解格式
 

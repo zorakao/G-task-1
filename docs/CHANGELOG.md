@@ -5,10 +5,13 @@
 ## [Unreleased]
 
 ### Added
-- 待補：新增功能與文件
+- ECPay AIO 串接主流程：`/api/orders/:id/ecpay/checkout-data`（建立付款表單資料）。
+- 本地主動查詢驗證流程：`/api/orders/:id/ecpay/verify` 呼叫 QueryTradeInfo 同步訂單狀態。
+- 訂單詳情頁新增「前往綠界付款」與「重新查詢付款結果」互動。
 
 ### Changed
-- 待補：既有行為調整
+- 付款主流程由「前端模擬成功/失敗」改為「導向 ECPay + 主動查詢驗證」。
+- `PATCH /api/orders/:id/pay` 改標記為 Legacy/Test 用途。
 
 ### Fixed
 - 待補：問題修復

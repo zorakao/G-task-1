@@ -1,4 +1,5 @@
 const { app, request, registerUser } = require('./setup');
+const ecpayService = require('../src/services/ecpayService');
 
 describe('Orders API', () => {
   let userToken;
@@ -100,6 +101,68 @@ describe('Orders API', () => {
     expect(res.body.data).toHaveProperty('order_no');
     expect(res.body.data).toHaveProperty('items');
     expect(Array.isArray(res.body.data.items)).toBe(true);
+  });
+
+  it('should get ecpay checkout data for pending order', async () => {
+    const res = await request(app)
+      .post(`/api/orders/${orderId}/ecpay/checkout-data`)
+      .set('Authorization', `Bearer ${userToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('error', null);
+    expect(res.body.data).toHaveProperty('action');
+    expect(res.body.data.action).toContain('/Cashier/AioCheckOut/V5');
+    expect(res.body.data).toHaveProperty('fields');
+    expect(res.body.data.fields).toHaveProperty('MerchantTradeNo');
+    expect(res.body.data.fields).toHaveProperty('ChoosePayment', 'ALL');
+    expect(res.body.data.fields).toHaveProperty('CheckMacValue');
+  });
+
+  it('should verify ecpay query and update order status to paid', async () => {
+    const orderRes = await request(app)
+      .get(`/api/orders/${orderId}`)
+      .set('Authorization', `Bearer ${userToken}`);
+    const orderNo = orderRes.body.data.order_no;
+    const merchantTradeNo = ecpayService.toMerchantTradeNo(orderNo);
+
+    const queryResult = {
+      MerchantID: process.env.ECPAY_MERCHANT_ID,
+      MerchantTradeNo: merchantTradeNo,
+      TradeNo: '2504161200001234',
+      TradeAmt: String(orderRes.body.data.total_amount),
+      PaymentDate: '2026/04/16 12:30:00',
+      PaymentType: 'Credit_CreditCard',
+      TradeDate: '2026/04/16 12:00:00',
+      TradeStatus: '1'
+    };
+    queryResult.CheckMacValue = ecpayService.generateCheckMacValue(
+      queryResult,
+      process.env.ECPAY_HASH_KEY,
+      process.env.ECPAY_HASH_IV
+    );
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => new URLSearchParams(queryResult).toString()
+    });
+
+    let res;
+    try {
+      res = await request(app)
+        .post(`/api/orders/${orderId}/ecpay/verify`)
+        .set('Authorization', `Bearer ${userToken}`);
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('error', null);
+    expect(res.body.data).toHaveProperty('order');
+    expect(res.body.data.order).toHaveProperty('status', 'paid');
+    expect(res.body.data).toHaveProperty('ecpay');
+    expect(res.body.data.ecpay).toHaveProperty('trade_status', '1');
+    expect(res.body.data.ecpay).toHaveProperty('trade_no', '2504161200001234');
   });
 
   it('should return 404 for non-existent order', async () => {
