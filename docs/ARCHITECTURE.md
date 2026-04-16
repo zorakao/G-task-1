@@ -130,7 +130,9 @@
 - 掛載頁面路由 `/`。
 - 最後掛載 404 handler 與 `errorHandler`。
 
-## 4. API 路由總覽
+## 4. 路由總覽
+
+### 4.1 REST API 路由
 
 | 前綴 | 路由檔案 | 認證 | 授權 | 說明 |
 | --- | --- | --- | --- | --- |
@@ -140,7 +142,20 @@
 | `/api/orders` | `src/routes/orderRoutes.js` | 需 JWT（`/ecpay/notify` 例外） | 一般使用者/管理員皆可查自己的訂單 | 建單、查自己的訂單、ECPay 導轉資料與主動查詢 |
 | `/api/admin/products` | `src/routes/adminProductRoutes.js` | 需 JWT | 需 `role=admin` | 後台商品 CRUD |
 | `/api/admin/orders` | `src/routes/adminOrderRoutes.js` | 需 JWT | 需 `role=admin` | 後台訂單列表、詳情 |
-| `/` | `src/routes/pageRoutes.js` | 頁面本身不做 server-side 保護 | 前端 JS guard | 前台與後台頁面渲染 |
+
+### 4.2 頁面路由
+
+| 路徑 | 路由檔案 | 認證 | 說明 |
+| --- | --- | --- | --- |
+| `/` | `src/routes/pageRoutes.js` | 前端選配 | 前台首頁 |
+| `/products/:id` | `src/routes/pageRoutes.js` | 前端選配 | 商品詳情頁 |
+| `/cart` | `src/routes/pageRoutes.js` | 前端選配 | 購物車頁 |
+| `/checkout` | `src/routes/pageRoutes.js` | 前端需登入（`requireAuth`） | 結帳頁 |
+| `/login` | `src/routes/pageRoutes.js` | 不需 | 登入/註冊頁 |
+| `/orders` | `src/routes/pageRoutes.js` | 前端需登入（`requireAuth`） | 我的訂單頁 |
+| `/orders/:id` | `src/routes/pageRoutes.js` | 前端需登入（`requireAuth`） | 訂單詳情頁 |
+| `/admin/products` | `src/routes/pageRoutes.js` | 前端需管理員（`requireAdmin`） | 後台商品管理頁 |
+| `/admin/orders` | `src/routes/pageRoutes.js` | 前端需管理員（`requireAdmin`） | 後台訂單管理頁 |
 
 ## 5. 統一回應格式
 
